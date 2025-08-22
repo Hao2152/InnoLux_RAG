@@ -1,7 +1,6 @@
 import os
-os.environ["HF_HUB_OFFLINE"] = "1"
-os.environ["TRANSFORMERS_OFFLINE"] = "1"  # 以上兩行要在載入模型之前
-
+os.environ.setdefault("HF_HUB_OFFLINE", "1")
+os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 import re
 import json
 import argparse
@@ -18,8 +17,8 @@ from transformers import AutoTokenizer, AutoConfig
 from sentence_transformers import SentenceTransformer
 from transformers.utils import logging as hf_logging
 from Paths import BASE, MODELS_DIR, DATA_DIR, rp
-Model_Dir = MODELS_DIR / "intfloat-multilingual-e5-base"
-model = SentenceTransformer(str(Model_Dir), device="cpu")
+#Model_Dir = MODELS_DIR / "intfloat-multilingual-e5-base"
+#model = SentenceTransformer(str(Model_Dir), device="cpu")
 #關閉huggingface提醒
 hf_logging.set_verbosity_error()
 _WS = re.compile(r'\s+')
@@ -114,7 +113,7 @@ def chunk_by_token(tokenizer: AutoTokenizer, page_text: str, chunk_tokens=700, o
     return chunks
 
 class E5Embedder:
-    def __init__(self, model_name: str = "intfloat/multilingual-e5-base"):
+    def __init__(self, model_name: str = "intfloat-multilingual-e5-base"):
         self.model_name = model_name
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.model = SentenceTransformer(model_name, device=self.device)
@@ -261,11 +260,12 @@ def main():
     from pathlib import Path
     import glob, re
 
+    DEFAULT_MODEL_DIR = (MODELS_DIR / "intfloat-multilingual-e5-base")
     ap = argparse.ArgumentParser()
     # 說明文字改一下，但參數仍然只有一個 --pdf（保持相容）
-    ap.add_argument("--pdf", default="D:/Py/Paper(RAG6)", type=str, help="PDF 檔路徑、資料夾、通配路徑（例如 D:\\docs\\*.pdf），也可用逗號分隔多個檔案")
-    ap.add_argument("--index_dir", default="D:/Py/VectorDatabase", type=str, help="FAISS 索引與 JSONL 存放目錄")
-    ap.add_argument("--model_name", default=MODELS_DIR/"multilingual-e5-base", type=str, help="embedding 模型")
+    ap.add_argument("--pdf", default="", type=str, help="PDF 檔路徑、資料夾、通配路徑（例如 D:\\docs\\*.pdf），也可用逗號分隔多個檔案")
+    ap.add_argument("--index_dir", default="", type=str, help="FAISS 索引與 JSONL 存放目錄")
+    ap.add_argument("--model_name", default=str(DEFAULT_MODEL_DIR), type=str, help="embedding 模型")
     ap.add_argument("--chunk_tokens", default=480, type=int, help="每個 chunk 的最大 token 數")
     ap.add_argument("--overlap", default=80, type=int, help="chunk 之間的重疊 token")
     args = ap.parse_args()
