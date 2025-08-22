@@ -29,7 +29,7 @@ W_VEC = 0.5
 # 固定模組路徑
 RETRIEVAL_DEFAULT = Path(BASE/"RAG_Retrieval.py").resolve()
 CHUNKING_DEFAULT = Path(BASE/"RAG_Chunking.py").resolve()
-
+model_path = str(MODELS_DIR / "intfloat-multilingual-e5-base")
 # ---- Path 檢查工具 ----
 _CJK_REGEX = re.compile(r"[\u3400-\u4DBF\u4E00-\u9FFF\u3000-\u303F\uFF00-\uFFEF]")
 
@@ -384,7 +384,7 @@ class RAGApp(tk.Tk):
         if not out_dir:
             messagebox.showwarning("提示", "請先指定索引輸出資料夾")
             return
-        model_path = "intfloat/multilingual-e5-base"
+        #model_path = "intfloat/multilingual-e5-base"
         targets = [self.list_targets.get(i) for i in range(self.list_targets.size())]
         if not targets:
             messagebox.showwarning("提示", "請加入 PDF 檔或資料夾")
