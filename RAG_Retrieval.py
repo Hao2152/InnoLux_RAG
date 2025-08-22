@@ -181,11 +181,12 @@ def format_references(docs: List[Dict[str, Any]], ranked: List[tuple]) -> str:
     return "\n".join(lines)
 
 def main():
+    DEFAULT_MODEL_DIR = (MODELS_DIR / "intfloat-multilingual-e5-base")
     parser = argparse.ArgumentParser(description="Simple RAG Retriever -> Augmented Prompt")
-    parser.add_argument("--data", type=str, default="./VectorDatabase/metadata.jsonl", help="metadata.jsonl 路徑")
-    parser.add_argument("--index", type=str, default="/VectorDatabase/index.faiss", help="index.faiss 路徑（可選）")
-    parser.add_argument("--embedder", type=str, default= MODELS_DIR/"intfloat-multilingual-e5-base", help="SentenceTransformer 模型")
-    parser.add_argument("--topk", type=int, default=10, help="擷取前幾筆片段")
+    parser.add_argument("--data", type=str, default="", help="metadata.jsonl 路徑")
+    parser.add_argument("--index", type=str, default="", help="index.faiss 路徑（可選）")
+    parser.add_argument("--embedder", type=str, default=str(DEFAULT_MODEL_DIR), help="SentenceTransformer 模型")
+    parser.add_argument("--topk", type=int, default=5, help="擷取前幾筆片段")
     parser.add_argument("--snippet", type=int, default=480, help="每段 snippet 的最大字元數；<=0 表示不截斷")
     parser.add_argument("--hybrid", action="store_true", help="啟用 Hybrid（BM25 + 向量）融合")
     parser.add_argument("--query_prefix", type=str, default="query: ", help="查詢前綴（E5 常用 'query: '）")
