@@ -16,16 +16,17 @@ import torch
 from transformers import AutoTokenizer, AutoConfig
 from sentence_transformers import SentenceTransformer
 from transformers.utils import logging as hf_logging
-from Paths import BASE, MODELS_DIR, DATA_DIR, rp
-#Model_Dir = MODELS_DIR / "intfloat-multilingual-e5-base"
-#model = SentenceTransformer(str(Model_Dir), device="cpu")
-#關閉huggingface提醒
+
+MODELS_DIR = Path("models").resolve()
+DEFAULT_MODEL_DIR = (MODELS_DIR / "intfloat-multilingual-e5-base")
+
+# 關閉huggingface提醒
 hf_logging.set_verbosity_error()
 _WS = re.compile(r'\s+')
 
 # ---------- 小工具 ----------
 def normalize_text_no_newline(s: str) -> str:
-    """將所有換行（實際換行與字面 '\\n'）改成空白，並壓縮多個空白。"""
+    """將所有換行（實際換行與字面 '\n'）改成空白，並壓縮多個空白。"""
     if not isinstance(s, str):
         s = str(s)
     # 先統一換行符號
@@ -53,7 +54,7 @@ def split_if_overlong(text: str, tokenizer: AutoTokenizer, model_name: str,
     if len(ids) <= budget:
         return [text]
 
-    pieces = []
+    pieces: list[str] = []
     step = max(1, int(budget * (1 - overlap_ratio)))  # 例如 0.83 * budget
     for i in range(0, len(ids), step):
         sub_ids = ids[i:i+budget]
@@ -157,64 +158,61 @@ def save_index(index_dir: Path, index, metas: List[Dict[str, Any]], cfg: Dict[st
         json.dump(cfg, f, ensure_ascii=False, indent=2)
 
 def add_pdf_to_db(pdf_path: Path, index_dir: Path, model_name: str, chunk_tokens: int, overlap: int):
-
-    checksum = sha256_file(pdf_path)  # 你原本就有的工具函式，會回傳 "sha256:xxxxx"
-    existed = load_existing(index_dir)  # 你原本就有的讀取函式
-    if existed and any(
-        (rec.get("metadata", {}) or {}).get("checksum") == checksum
-        for rec in existed["metas"]
-    ):
+    """
+    方案A版：先切到最終片段（含安全切分），再建立 metadata；確保 chunks 與 metas 一一對齊。
+    並加入健全化：在嵌入前 assert len(chunks) == len(metas)。
+    """
+    # 去重：以檔案 checksum 檢查是否已存在
+    checksum = sha256_file(pdf_path)
+    existed = load_existing(index_dir)
+    if existed and any((rec.get("metadata", {}) or {}).get("checksum") == checksum for rec in existed["metas"]):
         print(f"[SKIP] {pdf_path.name} 已存在（checksum 命中）")
         return
-    
 
+    # 準備模型與 tokenizer
     emb = E5Embedder(model_name)
     tokenizer = emb.tokenizer
 
-    # 讀 PDF -> 分頁文字 -> chunk
+    # 逐頁取文字
     pages = pdf_pages_text(pdf_path)
-    chunks, metas = [], []
-    checksum = sha256_file(pdf_path)
+
+    # 先切粗段，再做安全切分；每個最終片段都建立對應 metadata
+    chunks: List[str] = []
+    metas: List[Dict[str, Any]] = []
     running_local_id = 0
-    for pageno, page_text in enumerate(pages, start=1):
-        page_chunks = chunk_by_token(tokenizer, page_text, chunk_tokens, overlap)
-        for ch in page_chunks:
-            metas.append({
-                "text": normalize_text_no_newline(ch),
-                "metadata": {
-                    "doc_id": pdf_path.name,
-                    "checksum": checksum,
-                    "source_uri": str(pdf_path.resolve())
-                }
-            })
-            chunks.append(ch)
-            running_local_id += 1
+    for page_no, page_text in enumerate(pages, start=1):
+        coarse_chunks = chunk_by_token(tokenizer, page_text, chunk_tokens, overlap)
+        for chunk_no, coarse in enumerate(coarse_chunks, start=1):
+            # 安全切分，確保不超過模型上限（含前綴）
+            final_pieces = split_if_overlong(
+                coarse, tokenizer, model_name,
+                margin=32, prefix="passage: ", overlap_ratio=0.17
+            )
+            for piece_no, piece in enumerate(final_pieces, start=1):
+                chunks.append(piece)
+                metas.append({
+                    "text": normalize_text_no_newline(piece),
+                    "metadata": {
+                        "doc_id": pdf_path.name,
+                        "checksum": checksum,
+                        "source_uri": str(pdf_path.resolve()),
+                        "page_no": page_no,
+                        "chunk_no": chunk_no,
+                        "piece_no": piece_no,
+                        "local_seq": running_local_id
+                    }
+                })
+                running_local_id += 1
 
     if not chunks:
         print(f"[警告] {pdf_path.name} 沒有可用文字，略過。")
         return
 
+    # 健全化 1：嵌入前後做長度守門員
+    assert len(chunks) == len(metas), f"mismatch before embed: vec_in={len(chunks)} meta={len(metas)}"
+
     # 產生向量
-    tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True, trust_remote_code=True)
-    safe_chunks = []
-    for c in chunks:
-        safe_chunks.extend(
-            split_if_overlong(
-                c, tokenizer, model_name,
-                margin=32, prefix="passage: ", overlap_ratio=0.17
-            )
-        )
-    chunks = safe_chunks
-
-    # （可選）除錯：看切完後的最長 token 長度（含前綴與特殊符號），應 ≤ 512
-    if chunks:
-        max_len = max(len(tokenizer.encode("passage: " + c)) for c in chunks)
-        print(f"最長序列長度（含前綴/特殊符號）：{max_len}")
-
-    print(f"正在產生向量：{len(chunks)} 個 chunks（{emb.model_name} @ {emb.device}）")
-
-
-    vecs = emb.embed_chunks(chunks)   # 若 embed_chunks 內部已加前綴，就用這行
+    vecs = emb.embed_chunks(chunks).astype(np.float32)
     dim = vecs.shape[1]
 
     # 載入或建立索引
@@ -222,8 +220,8 @@ def add_pdf_to_db(pdf_path: Path, index_dir: Path, model_name: str, chunk_tokens
     if existed is None:
         # 新建
         index = faiss.IndexIDMap(faiss.IndexFlatIP(dim))
-        all_metas = []
-        cfg = {"model_name": emb.model_name, "dim": dim, "created_by": "pdf_embed_single.py"}
+        all_metas: List[Dict[str, Any]] = []
+        cfg = {"model_name": emb.model_name, "dim": dim, "created_by": "RAG_Chunking.py"}
         next_id = 0
     else:
         index = existed["index"]
@@ -253,16 +251,12 @@ def add_pdf_to_db(pdf_path: Path, index_dir: Path, model_name: str, chunk_tokens
     print(f"新增 chunks：{len(vecs)}  筆（id 範圍：{ids[0]} ~ {ids[-1]}）")
     print(f"向量維度：{dim}")
     print(f"資料庫位置：{index_dir.resolve()}")
-    print(f"目前索引總筆數：{index.ntotal}")
+
 
 def main():
-    import argparse
-    from pathlib import Path
-    import glob, re
+    import glob
 
-    DEFAULT_MODEL_DIR = (MODELS_DIR / "intfloat-multilingual-e5-base")
     ap = argparse.ArgumentParser()
-    # 說明文字改一下，但參數仍然只有一個 --pdf（保持相容）
     ap.add_argument("--pdf", default="", type=str, help="PDF 檔路徑、資料夾、通配路徑（例如 D:\\docs\\*.pdf），也可用逗號分隔多個檔案")
     ap.add_argument("--index_dir", default="", type=str, help="FAISS 索引與 JSONL 存放目錄")
     ap.add_argument("--model_name", default=str(DEFAULT_MODEL_DIR), type=str, help="embedding 模型")
@@ -273,8 +267,8 @@ def main():
     index_dir = Path(args.index_dir)
     target = Path(args.pdf)
 
-    # 蒐集要處理的 PDF 清單（僅在 main 做，其他函式不用改）
-    pdf_list = []
+    # 蒐集要處理的 PDF 清單
+    pdf_list: List[Path] = []
 
     # 1) 若是資料夾：抓該夾內所有 .pdf（不遞迴；要遞迴可改成 rglob("*.pdf")）
     if target.is_dir():
@@ -282,7 +276,7 @@ def main():
 
     else:
         # 2) 支援逗號分隔與萬用字元
-        #    例如 --pdf "D:\a.pdf,D:\b.pdf" 或 --pdf "D:\docs\*.pdf"
+        #    例如 --pdf "D:\\a.pdf,D:\\b.pdf" 或 --pdf "D:\\docs\\*.pdf"
         tokens = [t.strip() for t in re.split(r"[,\u3001;]", args.pdf) if t.strip()]
         for t in tokens:
             if any(ch in t for ch in "*?[]"):
@@ -298,18 +292,20 @@ def main():
                     pdf_list.append(p)
 
     # 去重、過濾不存在或副檔名不是 .pdf 的
-    uniq = []
+    uniq: List[Path] = []
     seen = set()
     for p in pdf_list:
         try:
             p = p.resolve()
         except Exception:
-            p = Path(p)
-        if p.exists() and p.suffix.lower() == ".pdf" and p not in seen:
-            uniq.append(p)
-            seen.add(p)
-        else:
-            print(f"[WARN] 略過：{p}（不存在或非 PDF）")
+            continue
+        if not p.exists() or p.suffix.lower() != ".pdf":
+            continue
+        if p in seen:
+            continue
+        uniq.append(p)
+        seen.add(p)
+
     pdf_list = uniq
 
     if not pdf_list:
@@ -319,7 +315,6 @@ def main():
     print(f"將處理 {len(pdf_list)} 份 PDF：")
     for i, pdf_path in enumerate(pdf_list, 1):
         print(f"\n[ {i}/{len(pdf_list)} ] {pdf_path}")
-        # 這裡呼叫你原本的單檔處理函式，不需要改其他程式碼
         add_pdf_to_db(pdf_path, index_dir, args.model_name, args.chunk_tokens, args.overlap)
 
     print("Done!")
