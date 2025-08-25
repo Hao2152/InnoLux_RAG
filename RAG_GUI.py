@@ -22,7 +22,7 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 
 # 預設參數（檢索頁面）
-DEFAULT_SNIPPET_CHARS = 420
+DEFAULT_SNIPPET_CHARS = 490
 W_BM25 = 0.5
 W_VEC = 0.5
 
@@ -286,6 +286,8 @@ class RAGApp(tk.Tk):
             # 載入語料（metadata.jsonl）
             meta_path = index_dir / "metadata.jsonl"
             docs = self.mod_retrieval.load_corpus(meta_path)
+            # 健全化 2：建立 id→row 對應
+            id2row = {d.get('id'): i for i, d in enumerate(docs) if d.get('id') is not None}
             # BM25
             bm25 = self.mod_retrieval.BM25(docs)
             bm25_res = bm25.search(query, topk=topk)
@@ -307,9 +309,60 @@ class RAGApp(tk.Tk):
             else:
                 ranked = bm25_res
 
+            # 過濾不在語料的 id，避免索引/語料不一致
+            ranked = [(s, i) for (s, i) in ranked if i in id2row]
+
+            #######################################Debugging(判斷是否將Snip丟入判斷)
+            """
+            print("\n=== CANDIDATES BEFORE FILTER ===")
+            for k, (score, doc_id) in enumerate(ranked, 1):
+                row = id2row.get(doc_id)
+                if row is None: 
+                    continue
+                d   = docs[row]
+                txt = d.get("text", "") or ""
+                try:
+                # 與實際過濾一致：用 snippet 來判斷
+                    snip = self.mod_retrieval._pick_best_sentence(query, txt, embedder=self.mod_retrieval._GLOBAL_EMBEDDER, min_chars=60, max_chars=DEFAULT_SNIPPET_CHARS)
+                except Exception:
+                    snip = txt[:DEFAULT_SNIPPET_CHARS]
+
+                is_bib = self.mod_retrieval.looks_like_bibliography(snip)
+                print(f"[PRE] {k:02d}  score={score:.3f}  id={doc_id}  " f"file={Path(d.get('source_uri','')).name}  p{d.get('page_no')}  bib={is_bib}")
+                print("SNIP:", snip)
+                print("-" * 80)
+            """
+            #######################################
+            
+            ranked = [(s, i) for (s, i) in ranked if not self.mod_retrieval.looks_like_bib_by_snippet(docs[id2row[i]]["text"],query,490)]
+
+            #######################################Debugging
+            """
+            print("\n=== CANDIDATES AFTER FILTER ===")
+            for k, (score, doc_id) in enumerate(ranked, 1):
+                row = id2row.get(doc_id)
+                if row is None:
+                    continue
+                d   = docs[row]
+                txt = d.get("text", "") or ""
+                try:
+                    snip = self.mod_retrieval._pick_best_sentence(query, txt, embedder=self.mod_retrieval._GLOBAL_EMBEDDER, min_chars=60, max_chars=DEFAULT_SNIPPET_CHARS)
+                except Exception:
+                    snip = txt[:DEFAULT_SNIPPET_CHARS]
+
+                is_bib = self.mod_retrieval.looks_like_bibliography(snip)
+                print(f"[POST] {k:02d}  score={score:.3f}  id={doc_id}  " f"file={Path(d.get('source_uri','')).name}  p{d.get('page_no')}  bib={is_bib}")
+                print("SNIP:", snip)
+                print("-" * 80)
+            """
+            #######################################
+            if not ranked:
+                self.status_var.set('查無結果，請調整關鍵字或 Top-K')
+                return
+
             # 組裝 Prompt（固定 snippet 字元上限）
-            aug = self.mod_retrieval.compose_augmented_prompt(DEFAULT_SNIPPET_CHARS, query, docs, ranked)
-            refs = self.mod_retrieval.format_references(docs, ranked)
+            aug = self.mod_retrieval.compose_augmented_prompt(DEFAULT_SNIPPET_CHARS, query, docs, ranked, id2row)
+            refs = self.mod_retrieval.format_references(docs, ranked, id2row)
 
             self.txt_prompt.delete("1.0", "end")
             self.txt_prompt.insert("1.0", aug.strip())
