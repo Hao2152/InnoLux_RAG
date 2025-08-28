@@ -7,3 +7,9 @@
     "python -m pip install -U pyinstaller" 
     "pyinstaller --name RAG --windowed --onedir --add-data "logo.png;." --add-data "models;models" --collect-all sentence_transformers --hidden-import torch._C --hidden-import PIL._imagingtk --hidden-import RAG_Chunking --hidden-import RAG_Retrieval RAG_GUI.py"
 6. 輸出完的exe檔會在dist資料夾(名稱為RAG.exe)，再來將RAG_Retrieval.py以及RAG_Chunking.py放入dist/_internal即可
+
+
+未來可執行/修改方向
+1. 可選不同Transformer models
+2. 使用一些指標評斷RAG的好壞
+3. 可過濾論文底下的references(Embedding/Retrieval)
