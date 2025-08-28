@@ -6,17 +6,14 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
 from Paths import BASE, MODELS_DIR, DATA_DIR, rp
 
-# ========================
-# 句子級 re-rank + 呈現工具
-# ========================
 _GLOBAL_EMBEDDER = None   # 由 try_load_embedder 設定，compose_augmented_prompt 可取用
 
 # 常見中英標點斷句；保留標點後換行或空白做切分
 _SENT_SPLIT = re.compile(r'(?<=[。！？…；：!?;:])\s+|(?<=[\.\?\!])\s+')
 def looks_like_bib_by_snippet(text: str, user_query: str, max_chars: int = 240) -> bool:
     """
-    以『挑出的最佳片段（snippet）』來判斷是否像參考文獻。
-    只要 snippet 不像文獻，就保留該候選，避免因 chunk 內少量 [n]/vol./pp. 誤殺。
+    以挑出的最佳片段（snippet）判斷是否像參考文獻
+    只要 snippet 不像文獻，就保留
     """
     try:
         _min = 60
@@ -27,7 +24,6 @@ def looks_like_bib_by_snippet(text: str, user_query: str, max_chars: int = 240) 
         )
         return looks_like_bibliography(snippet)
     except Exception:
-        # 出錯時退回 chunk 判斷，寧可誤擋也不要漏網
         return looks_like_bibliography(text)
     
 def _split_sentences(text: str) -> list[str]:
@@ -35,7 +31,7 @@ def _split_sentences(text: str) -> list[str]:
     if not s:
         return []
     parts = [p.strip() for p in _SENT_SPLIT.split(s) if p and p.strip()]
-    # 若整段幾乎沒有標點，退回粗切：每 ~100 字切一刀，避免只拿到片語
+    # 若整段幾乎沒有標點：每 ~100 字切一刀，避免只拿到片語
     if len(parts) <= 1 and len(s) > 140:
         step = 100
         parts = [s[i:i+step].strip() for i in range(0, len(s), step)]
@@ -79,7 +75,7 @@ def _grow_span_around(sents: list[str], center: int, *, min_chars: int, max_char
     return result
 
 def _simple_tokens(t: str) -> list[str]:
-    # 英數與中日韓統一表意文字做簡單分詞
+    # 英數與中文字做簡單分詞
     return [w for w in re.split(r'[^0-9A-Za-z\u4e00-\u9fff]+', (t or "").lower()) if w]
 
 def make_snippet(text: str, maxlen: int = 420) -> str:
@@ -115,7 +111,6 @@ def mask_snippet(snippet: str, query: str, left: str = "【", right: str = "】"
     except re.error:
         return snippet
 
-# --- 關鍵詞偏置（更貼合“怎麼選/定義/標註”類問題） ---
 _BONUS_TERMS = {"define","definition","ground truth","annotation","label","mask","gt",
                 "標註","遮罩","定義","選","準則","規範","標準"}
 
@@ -124,7 +119,7 @@ def _kw_bonus(sent: str) -> float:
     return 0.05 if any(k in s for k in _BONUS_TERMS) else 0.0
 
 def _pick_best_sentence(user_query: str, text: str, embedder=None, *, min_chars: int = 80, max_chars: int = 420) -> str:
-    """回傳『至少是完整一句、長度夠』的參考片段。"""
+    """回傳至少是完整一句、長度夠的參考片段。"""
     sents = _split_sentences(text)
     if not sents:
         return make_snippet(text, maxlen=max_chars)
@@ -152,10 +147,6 @@ def _pick_best_sentence(user_query: str, text: str, embedder=None, *, min_chars:
     if len(best) < min_chars or len(_simple_tokens(best)) <= 2:
         return _grow_span_around(sents, best_idx, min_chars=min_chars, max_chars=max_chars)
     return best if len(best) <= max_chars else (best[:max_chars-1].rstrip() + "…")
-
-# ========================
-# 語料與檢索
-# ========================
 
 def load_corpus(jsonl_path: Path) -> List[Dict[str, Any]]:
     """讀取 metadata.jsonl，統一成檢索端需要的欄位。"""
@@ -271,10 +262,6 @@ def faiss_search(query: str,
             score = -float(dist)
         hits.append((score, int(doc_id)))
     return hits
-
-# ========================
-# 融合、過濾與展示
-# ========================
 
 def normalize(scores: List[tuple]) -> Dict[int, float]:
     """將 [(score, id), ...] normalize 到 0~1，回傳 {id: norm_score}"""
@@ -403,10 +390,10 @@ def expand_queries(user_query: str) -> List[str]:
             out.append(x); seen.add(x)
     return out
 
-# ========================
-# CLI
-# ========================
-
+"""
+GUI不會使用到這邊
+Debug用
+"""
 def main():
     DEFAULT_MODEL_DIR = (MODELS_DIR / "intfloat-multilingual-e5-base")
     parser = argparse.ArgumentParser(description="RAG Retriever -> Augmented Prompt（id 映射＋句子級 snippet＋過濾/擴充/多樣化/高亮）")
