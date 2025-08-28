@@ -1,6 +1,9 @@
 import os
+
+#離線模式設定
 os.environ.setdefault("HF_HUB_OFFLINE", "1")
 os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+
 import re
 import json
 import argparse
@@ -17,11 +20,13 @@ from transformers import AutoTokenizer, AutoConfig
 from sentence_transformers import SentenceTransformer
 from transformers.utils import logging as hf_logging
 
+#預設Transformer路徑
 MODELS_DIR = Path("models").resolve()
 DEFAULT_MODEL_DIR = (MODELS_DIR / "intfloat-multilingual-e5-base")
 
 # 關閉huggingface提醒
 hf_logging.set_verbosity_error()
+
 _WS = re.compile(r'\s+')
 
 # ---------- 小工具 ----------
@@ -40,13 +45,12 @@ def normalize_text_no_newline(s: str) -> str:
 def split_if_overlong(text: str, tokenizer: AutoTokenizer, model_name: str,
                       margin: int = 32, prefix: str = "passage: ", overlap_ratio: float = 0.17) -> list[str]:
     """
-    若 text 編成 token 後超過模型上限，切成多段（含重疊），確保每段 <= 可用預算。
-    overlap_ratio 建議 0.15~0.20
+    若 text 編成 token 後超過模型上限(multilingual為485)，切成多段（含重疊），確保每段 <= 可用預算。
     """
     cfg = AutoConfig.from_pretrained(model_name, trust_remote_code=True)
     max_len = getattr(cfg, "max_position_embeddings", 512) or 512
 
-    # E5/BGE 會加前綴，再預留一些安全邊界
+    # E5 會加前綴，再預留一些安全邊界
     prefix_ids = tokenizer.encode(prefix, add_special_tokens=False)
     budget = max(128, max_len - margin - len(prefix_ids))
 
@@ -62,6 +66,9 @@ def split_if_overlong(text: str, tokenizer: AutoTokenizer, model_name: str,
     return pieces
 
 def sha256_file(path: Path) -> str:
+    """
+    用來做pdf編碼 用來判斷是否重複內容
+    """
     h = hashlib.sha256()
     with open(path, "rb") as f:
         for chunk in iter(lambda: f.read(8192), b""):
@@ -79,6 +86,9 @@ def normalize_text(t: str) -> str:
     return t.strip()
 
 def pdf_pages_text(pdf_path: Path) -> List[str]:
+    """
+    將每頁的所有文字取出
+    """
     doc = fitz.open(pdf_path.as_posix())
     texts = []
     for i in range(doc.page_count):
@@ -89,6 +99,10 @@ def pdf_pages_text(pdf_path: Path) -> List[str]:
     return texts
 
 def chunk_by_token(tokenizer: AutoTokenizer, page_text: str, chunk_tokens=700, overlap=120) -> List[str]:
+    """
+    依照指定的chunk_tokens數來切成一個chunk
+    如果超過指定tokens數會切成兩部分並且要有overlap
+    """
     if not page_text.strip():
         return []
     paras = [p.strip() for p in re.split(r"\n{2,}", page_text) if p.strip()]
@@ -113,6 +127,7 @@ def chunk_by_token(tokenizer: AutoTokenizer, page_text: str, chunk_tokens=700, o
         chunks.append("\n\n".join(buf))
     return chunks
 
+#Transformer模型定義
 class E5Embedder:
     def __init__(self, model_name: str = "intfloat-multilingual-e5-base"):
         self.model_name = model_name
@@ -132,6 +147,9 @@ class E5Embedder:
         return vecs.astype(np.float32)
 
 def load_existing(index_dir: Path):
+    """
+    載入資料庫內容
+    """
     idx_path = index_dir / "index.faiss"
     meta_path = index_dir / "metadata.jsonl"
     cfg_path = index_dir / "config.json"
@@ -148,7 +166,11 @@ def load_existing(index_dir: Path):
         cfg = json.load(f)
     return {"index": index, "metas": metas, "cfg": cfg}
 
+
 def save_index(index_dir: Path, index, metas: List[Dict[str, Any]], cfg: Dict[str, Any]):
+    """
+    儲存所有資料庫內容
+    """
     index_dir.mkdir(parents=True, exist_ok=True)
     faiss.write_index(index, str(index_dir / "index.faiss"))
     with open(index_dir / "metadata.jsonl", "w", encoding="utf-8") as f:
@@ -159,10 +181,10 @@ def save_index(index_dir: Path, index, metas: List[Dict[str, Any]], cfg: Dict[st
 
 def add_pdf_to_db(pdf_path: Path, index_dir: Path, model_name: str, chunk_tokens: int, overlap: int):
     """
-    方案A版：先切到最終片段（含安全切分），再建立 metadata；確保 chunks 與 metas 一一對齊。
-    並加入健全化：在嵌入前 assert len(chunks) == len(metas)。
+    此為Embedding核心程式
+    先切到最終片段（含安全切分），再建立 metadata；確保 chunks 與 metas 一一對齊。
     """
-    # 去重：以檔案 checksum 檢查是否已存在
+    # 去重複：以檔案 checksum 檢查是否已存在
     checksum = sha256_file(pdf_path)
     existed = load_existing(index_dir)
     if existed and any((rec.get("metadata", {}) or {}).get("checksum") == checksum for rec in existed["metas"]):
