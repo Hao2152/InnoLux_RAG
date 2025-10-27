@@ -14,7 +14,7 @@ InnoLux_RAG/
 │   └── intfloat-multilingual-e5-base/  # 預設嵌入模型（SentenceTransformer）
 ├── Paths.py             # 共用路徑設定（BASE, MODELS_DIR, DATA_DIR 等）
 ├── logo.png             # GUI 標誌（Innolux）
-└── output/              # 建立的向量資料庫與 JSONL metadata
+└── requirement.txt      # 執行環境需求
 ```
 
 ## 系統功能說明
