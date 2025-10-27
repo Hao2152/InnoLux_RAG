@@ -206,8 +206,10 @@ Input : 使用者輸入查詢（query）
  __GUI執行時未用到，未來可擴充__
 - [ ] expand_queries(user_query) -> List[str]
     - [ ] 根據原始查詢產生多個擴充查詢，提升檢索覆蓋率
+    - [ ] 例如 : "micro LED" 可加上 "μLED", "micro-light emitting diode" 等
 - [ ] page_key(d) -> Tuple[str, Optional[int]]
     - [ ] 從一個文件資料 d 中提取出 __檔案名稱__ 和 __頁碼__，並組成一個 tuple 作為 key
+    - [ ] 用來在檢索結果中去除重複頁面
 
 
 # 環境建置
