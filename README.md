@@ -102,7 +102,7 @@ Input : [PDF 檔案 / 資料夾]
     - [ ] 對頁面做處理
 - [ ] pdf_pages_text(pdf_path) -> List[str]
     - [ ] 用 PyMuPDF 開啟 PDF，每頁取 __純文字__，每頁套用 normalize_text()
-    - [ ] 關檔後回傳每頁一段的文字陣列。
+    - [ ] 關檔後回傳每頁一段的文字陣列
 - [ ] chunk_by_token(tokenizer, page_text, chunk_tokens, overlap) -> List[str]
     - [ ] 先找出段落，每段累加其 token 數
     - [ ] 若該段落將超過 chunk_tokens，就把目前先送出為一個 chunk，並將下一個 chunk在開頭回貼 overlap 個 token 形成重疊，再開始累積下一個 chunk
