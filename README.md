@@ -1,5 +1,4 @@
 # InnoLux_RAG
-## Retrieval-Augmented Generation (RAG) System for Offline Corporate Knowledge Management
 
 ## Introduction
 InnoLux_RAG 是一個離線運行的文件檢索與擴增式生成系統
