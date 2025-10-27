@@ -179,7 +179,6 @@ Input : 使用者輸入查詢（query）
 - [ ] mask_snippet(snippet, query, left='【' , right='】') -> str
     - [ ] 對 snippet 中命中查詢詞的部分加上標記
     - [ ] 例如 : "我是工程師" → "【我】"、"是"、"【工程師】"
-    - [ ] __GUI執行時未用到，未來可擴充__
 - [ ] _kw_bonus(sent) -> float
     - [ ] 若句子中包含與標記相關的關鍵詞，給予加分（+0.05），幫助 _pick_best_sentence() 優先選擇關鍵描述
 - [ ] _pick_best_sentence(user_query, text, embedder, min_chars, max_chars) -> str
